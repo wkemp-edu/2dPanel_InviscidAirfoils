@@ -16,33 +16,48 @@ def build_matrices(surface, op_point):
     z_src = surface.srcpts[:, 1]
     mZj, mZi = np.meshgrid(z_clc, z_src)
 
-    dZ = mZj - mZi
-    dX = mXj - mXi
+    dZ = mZj - mZi  # Zij matrix (Contains all displacements from source i to collocation j
+    dX = mXj - mXi  # Xij matrix
     R = np.sqrt( dX**2 + dZ**2 )  # Finding the distance from ith source to jth collocation point
-    print(R)
 
-    Theta = np.arctan(dZ / dX)
-    print(Theta)
+    Ls, Lj = np.meshgrid(surface.lengths, surface.lengths)  # Length dSi in matrix form
+    EPs, EPj = np.meshgrid(surface.epsilon, surface.epsilon)  # Incidence angles epsilon at source i
 
-    Qx = (2*np.pi*R)**-1 * np.cos(Theta)
-    Qz = (2*np.pi*R)**-1 * np.sin(Theta)
+    #  Finding local displacements from rotation of global displacements by epsilon
+    XQ = np.multiply(dX, np.cos(EPs)) - np.multiply(dZ, np.sin(EPs))
+    ZQ = np.multiply(dX, np.sin(EPs)) + np.multiply(dZ, np.cos(EPs))
 
-    Nx, no = np.meshgrid(surface.n_x, surface.n_x)
-    Nz, no = np.meshgrid(surface.n_z, surface.n_z)
+    #  Finding all local velocities from the local displacements XQ, ZQ
+    UQ = (-4*np.pi)**-1 * np.log( ((XQ - (0.5*Ls))**2 + ZQ**2)/((XQ + (0.5*Ls))**2 + ZQ**2) )
+    VQ = (-2*np.pi)**-1 * ( np.arctan((XQ-(0.5*Ls))/ZQ) - np.arctan((XQ+(0.5*Ls))/ZQ) )
 
-    ## Building D Matrix
-    D = Nx*Qx + Nz*Qz
+    #  Rotating all local velocities back into the global coordinate system
+    U = np.multiply(UQ, np.cos(EPs)) + np.multiply(VQ, np.sin(EPs))
+    V = -1*np.multiply(UQ, np.sin(EPs)) + np.multiply(VQ, np.cos(EPs))
+
+    #  Matrixizing the normal vector components
+    Nxi, Nxj = np.meshgrid(surface.n_x, surface.n_x)
+    Nzi, Nzj = np.meshgrid(surface.n_z, surface.n_z)
+
+    ## Building D Matrix (n dot V)ij = nj dot Vij
+    D = np.multiply(Nxi, U) + np.multiply(Nzi, V)
 
     ## Building B Matrix
     Ux_inf = op_point.U_inf * np.cos(op_point.AoA)
     Uz_inf = op_point.U_inf * np.sin(op_point.AoA)
 
-    B = np.transpose(surface.n_x * Ux_inf + surface.n_z * Uz_inf)
+    B = np.transpose([surface.n_x * Ux_inf + surface.n_z * Uz_inf])
     return D, B
+def panel_vel(sigma, length, x, z):
+    Vx = -sigma * (4*np.pi)**-1 * np.log( ((x-0.5*length)**2+z**2)/((x+0.5*length)**2+z**2) )
+    Vz = -sigma * (2*np.pi)**-1 * (np.arctan((x-(0.5*length))/z) - np.arctan((x+(0.5*length))/z))
+    return Vx, Vz
 
 class surface:
     def __init__(self, filename):
         self.points = None
+        self.srcpts = None
+        self.clcpts = None
         self.lengths = None
         self.epsilon = None  # Angle between x axis and panel from first point to second
         self.lowermask = None
@@ -52,7 +67,6 @@ class surface:
         self.def_cllcpts()
         self.def_srcpts()
         self.show()
-
     def import_surface(self):
         data_folder = Path("surfaces/")
         file_to_open = data_folder / self.filename
@@ -75,12 +89,12 @@ class surface:
         self.n_x = t_z
         self.n_z = -t_x
 
+        # Epsilon needs 180 degree rotation when on bottom surface
         self.epsilon = np.arctan(self.n_x / self.n_z)
-
+        self.epsilon = np.append(self.epsilon[~self.lowermask], self.epsilon[self.lowermask] - np.pi)
     def find_lengths(self):
         l = np.sqrt( np.sum( np.diff(self.points, axis=0) ** 2, axis=1 ) )
         self.lengths = l
-
     def def_cllcpts(self):
         # Defining the collocation points at 3/4 the length of the panel for upper surface,
         # Defining the collocation points at 1/4 the length of the panel for lower surface
@@ -94,7 +108,6 @@ class surface:
         z_c = np.append(z_cu[~self.lowermask], z_cl[self.lowermask])
         self.clcpts = np.stack((x_c, z_c), axis=1)
         # Problem, the panels begin at the trailing edge with x being positive, then moves counter clockwise
-
     def def_srcpts(self):
         # Defining the source points at 1/4 the length of the panel for upper surface
         # Defining the source points at 3/4 the length of the panel for lower surface
@@ -107,7 +120,6 @@ class surface:
         x_s = np.append(x_su[~self.lowermask], x_sl[self.lowermask])
         z_s = np.append(z_su[~self.lowermask], z_sl[self.lowermask])
         self.srcpts = np.stack((x_s, z_s), axis=1)
-
     def show(self):
         plt.figure()
         plt.plot(self.points[:, 0], self.points[:, 1], linestyle='', marker='.', label="Nodes")
@@ -115,7 +127,6 @@ class surface:
         plt.plot(self.clcpts[:, 0], self.clcpts[:, 1], linestyle='', marker='*', label="Collocations")
         plt.legend()
         plt.show()
-
 class op_point:
 
     def __init__(self, U_inf, AoA):
@@ -123,22 +134,32 @@ class op_point:
         self.AoA = AoA  # Angle of attack in radians
 
 # Defining FreeStream Condition
-
-U_inf = 10  # in m/s
+U_inf = 1  # in m/s
 alpha = 0  # AoA in radians
-
 operating_point = op_point(U_inf, alpha)
+
+#print(panel_vel(10*2*np.pi, 2*2, -1, -1))
+#print(panel_vel(10*2*np.pi, 2*2, 9, -1))
 
 # Getting surface points
 circle4 = surface("circle4.csv")
 circle8 = surface("circle8.csv")
+circle16 = surface("circle16.csv")
 circle32 = surface("circle32.csv")
 naca0012 = surface("naca0012.csv")
 
 # Constructing matrix to solve
-D, B = build_matrices(circle4, operating_point)
-print(D)
-print(B)
+D, B = build_matrices(circle32, operating_point)
 # Solving for Q's, or source strengths
 Q = np.linalg.solve(D, B)
+print(D)
+print(B)
 print(Q)
+
+plt.plot(Q, marker='.', linestyle='')
+plt.show()
+
+def panel_vel(sigma, length, x, z):
+    Vx = -sigma * (4*np.pi)**-1 * np.log( ((x-0.5*length)**2+z**2)/((x+0.5*length)**2+z**2) )
+    Vz = -sigma * (2*np.pi)**-1 * (np.arctan((x-0.5*length)/z) - np.arctan((x+0.5*length)/z))
+    return Vx, Vz
