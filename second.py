@@ -71,12 +71,17 @@ def build_matrices(surface, op_point):
     plt.show()
     
     ## Finding Streamlines
-    xv = np.linspace(-8, 8)
-    zv = np.linspace(-8, 8)
+    
+    if surface.filename == "naca0012.csv":
+        xv = np.linspace(-0.25, 1.25, 500)
+        zv = np.linspace(-0.2, 0.2, 500)
+    else:
+        xv = np.linspace(-8, 8, 500)
+        zv = np.linspace(-8, 8, 500)
     
     Xs, Zs = np.meshgrid(xv, zv)
     Ug = np.zeros(np.shape(Xs))
-    Vg = np.zeros(np.shape(Zs))    
+    Vg = np.zeros(np.shape(Zs))   
     
     for i, x in enumerate(xv):
         for j, z in enumerate(zv):
@@ -87,24 +92,28 @@ def build_matrices(surface, op_point):
             dXq = np.multiply(dX, np.cos(surface.epsilon)) - np.multiply(dZ, np.sin(surface.epsilon))
             dZq = np.multiply(dX, np.sin(surface.epsilon)) + np.multiply(dZ, np.cos(surface.epsilon))
             # Determining velocity contribution
-            Uq = (-2)**-1 * np.multiply(Q, np.log( np.divide( (np.square(dXq + (0.5*surface.lengths)) + np.square(dZq)), (np.square(dXq - (0.5*surface.lengths)) + np.square(dZq)) ) )) 
-            Vq = (-1)**-1 * np.multiply(Q, np.arctan((dXq+(0.5*surface.lengths))/dZq) - np.arctan((dXq-(0.5*surface.lengths))/dZq) )
+            # This is where its going wrong!!!!!
+            k1 = np.log( np.divide( (np.square(dXq + (0.5*surface.lengths)) + np.square(dZq)), (np.square(dXq - (0.5*surface.lengths)) + np.square(dZq))))
+            k1 = np.reshape(k1, np.shape(Q))
+            k2 = np.arctan((dXq+(0.5*surface.lengths))/dZq) - np.arctan((dXq-(0.5*surface.lengths))/dZq)
+            k2 = np.reshape(k2, np.shape(Q))
             
-            Vq = np.where(np.logical_and(np.multiply(dZq,dZq) < 1e-10, np.multiply(dXq,dXq) < 1e-10), np.pi, Vq)
-            Uq = np.where(np.logical_and(np.multiply(dZq,dZq) < 1e-10, np.multiply(dXq,dXq) < 1e-10), 0, Uq)
+            Uq = (-2)**-1 * np.multiply(Q, k1)
+            Vq = (-1)**-1 * np.multiply(Q, k2)
+            
             # Rotating Back
-            ut = np.multiply(Uq, np.cos(surface.epsilon)) + np.multiply(Vq, np.sin(surface.epsilon))
-            vt = np.multiply(-1*Uq, np.sin(surface.epsilon)) + np.multiply(Vq, np.cos(surface.epsilon))
+            ut = np.multiply(Uq, np.reshape(np.cos(surface.epsilon), np.shape(Uq))) + np.multiply(Vq, np.reshape(np.sin(surface.epsilon), np.shape(Vq)))
+            vt = np.multiply(-1*Uq, np.reshape(np.sin(surface.epsilon), np.shape(Uq))) + np.multiply(Vq, np.reshape(np.cos(surface.epsilon), np.shape(Vq)))
             # Adding all the elements
             ut = np.sum(ut)
             vt = np.sum(vt)
             # Storing in the matrix
-            Ug[j,i] = ut + Ux_inf
-            Vg[i,j] = vt
+            Ug[j,i] = -ut - Ux_inf
+            Vg[j,i] = -vt
     
     plt.figure()
-    plt.streamplot(Xs, Zs, Ug, Vg)
-    plt.plot(surface.clcpts[:,0], surface.clcpts[:,1])
+    plt.streamplot(Xs, Zs, Ug, Vg, density=5)
+    plt.scatter(surface.clcpts[:,0], surface.clcpts[:,1])
     plt.show()
     return Q
 
