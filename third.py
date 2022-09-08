@@ -75,11 +75,11 @@ def build_matrices(surface, op_point):
     ## Finding Streamlines
     
     if surface.filename == "naca0012.csv":
-        xv = np.linspace(-0.25, 1.25, 200)
-        zv = np.linspace(-0.2, 0.2, 200)
+        xv = np.linspace(-0.25, 1.25, 500)
+        zv = np.linspace(-0.2, 0.2, 500)
     else:
-        xv = np.linspace(-8, 8, 200)
-        zv = np.linspace(-8, 8, 200)
+        xv = np.linspace(-8, 8, 500)
+        zv = np.linspace(-8, 8, 500)
     
     Xs, Zs = np.meshgrid(xv, zv)
     Ug = np.zeros(np.shape(Xs))
